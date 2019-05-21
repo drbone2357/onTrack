@@ -2,6 +2,7 @@ import numpy
 from fpdf import FPDF
 import xlrd
 import os 
+import math
 
 # Represents a progress value for a particular test
 # Progress should be an array of char values: 'l', 'a', or 'm'
@@ -33,11 +34,11 @@ class PercentileValue:
         return str([self.startRange, self.endRange])
 
 # Inputs (Assume inputs are valid at this point, will handle validation in web form)
-GMFCSLevel = "III"
+GMFCSLevel = "I"
 age = [[3, 5], [4, 3]] # [[past year, past month], [current year, current month]]
 # Assign scores in this order: "ECAB", "SMWT", "SAROMM", "CEDLpar", "CEDLsc", "EASE", "FSA", "HEALTH", "GMFM"
 # With first element being past score and second current
-scores = [[25, 30], [220, 400], [1, 2], [55, 70], [35, 50], [3, 4], [2, 3], [3, 1], [22, 100]]
+scores = [[80, 95], [1175, 2000], [1, 0.3], [55, 70], [35, 50], [3, 4], [2, 3], [1, 5], [22, 100]]
 
 
 # Static, Global variables
@@ -63,6 +64,17 @@ mapForDifferenceSheets = {
     "HEALTH": 4, 
     "GMFM": 8
 }
+mapForOutput = {
+    "ECAB": 0, 
+    "SMWT": 3, 
+    "SAROMM": 2, 
+    "CEDLpar": 6, 
+    "CEDLsc": 7, 
+    "EASE": 4, 
+    "FSA": 1, 
+    "HEALTH": 5, 
+    "GMFM": 8
+}
 
 #testNames = ["ECAB"] #For testing run only ECAB
 percentileRow = 1
@@ -80,8 +92,15 @@ centileChange = [lowerCentileChangeSheet.col_slice(centileChangeColumnOffset+GMF
 
 # Takes age as input and returns row number to use for all tables
 def getRowNumFromAge(age):
-    monthRow = round(age[1]/3)
+    monthRow = math.floor(age[1]/3)
     return age[0]*4+monthRow-6
+
+def changeArrayOrder(array, transferMap):
+    result = array.copy()
+    for testIndex in range(numTests):
+        result[transferMap.get(testNamesForSheets[testIndex])] = array[testIndex]
+    return result
+
 
 # Looks through an array of cells to find start and end indices of the percent table
 def findStartAndEndCol(cells):
@@ -108,22 +127,27 @@ def getPerentiles(GMFCSLevel, age, scores):
             selectedRow = sheet.row_slice(row, percentileStartCol, percentileEndCol)
             closestScoreIndexStartRange = -1
             closestScoreIndexEndRange = -1
+
+            # Find score cells that match
+            thisScore = scores[testIndex][timeIndex]
             for cellIndex in range(len(selectedRow)):
                 currentCellValue = float(selectedRow[cellIndex].value)
-                thisScore = scores[testIndex][timeIndex]
-                
+
                 if(currentCellValue > thisScore):
-                    closestScoreIndexStartRange = cellIndex-1
+                    if(closestScoreIndexStartRange == -1):
+                        closestScoreIndexStartRange = cellIndex-1
                     closestScoreIndexEndRange = cellIndex-1
                     break
                 elif(currentCellValue == thisScore):
                     if(closestScoreIndexStartRange == -1):
                         closestScoreIndexStartRange = cellIndex
                     closestScoreIndexEndRange = cellIndex
-            if(cellIndex == closestScoreIndexStartRange):
-                value = float(sheet.cell(percentileRow, closestScoreIndexStartRange+percentileStartCol).value)
+            
+            # Check for range conditions
+            if(cellIndex == len(selectedRow)-1):
+                value = float(sheet.cell(percentileRow, len(selectedRow)-1+percentileStartCol).value)
                 percentileOfThisTime = PercentileValue(startRange=value)
-            elif(closestScoreIndexStartRange < 0):
+            elif(cellIndex == 0):
                 value = float(sheet.cell(percentileRow, percentileStartCol).value)
                 percentileOfThisTime = PercentileValue(endRange=value)
             elif(closestScoreIndexStartRange == closestScoreIndexEndRange):
@@ -131,7 +155,7 @@ def getPerentiles(GMFCSLevel, age, scores):
                 percentileOfThisTime = PercentileValue(value=value)
             else:
                 value1 = float(sheet.cell(percentileRow, closestScoreIndexStartRange+percentileStartCol).value)
-                value2 = float(sheet.cell(percentileRow, closestScoreIndexStartRange+percentileStartCol).value)
+                value2 = float(sheet.cell(percentileRow, closestScoreIndexEndRange+percentileStartCol).value)
                 percentileOfThisTime = PercentileValue(startRange=value1, endRange=value2)
             percentileOfThisTest.append(percentileOfThisTime)
             
@@ -157,16 +181,32 @@ def getProgress(GMFCSLevel, percentiles):
         thisProgress = []
         # First check if change is under lower bound, then in between bounds, then above upper bound
         if(difference[0] < centileChange[0][centileChangeRow].value):
-            thisProgress.append('l')
+            thisProgress.append('*')
+        else:
+            thisProgress.append('')
         if(difference[1] > centileChange[0][centileChangeRow].value and difference[0] < centileChange[1][centileChangeRow].value):
-            thisProgress.append('a')
+            thisProgress.append('*')
+        else:
+            thisProgress.append('')
         if(difference[1] > centileChange[1][centileChangeRow].value):
-            thisProgress.append('m')
+            thisProgress.append('*')
+        else:
+            thisProgress.append('')
+
+        if(testIndex == 2 or testIndex == 7):
+            thisProgress.reverse()
         progress.append(thisProgress)
     
     return progress
 
+
+
 percentiles = getPerentiles(GMFCSLevel, age, scores) 
 progress = getProgress(GMFCSLevel, percentiles) 
-   
+
+# Reorder to match output in excel
+progress = changeArrayOrder(progress, mapForOutput)
+percentiles = changeArrayOrder(percentiles, mapForOutput)
+  
+print(percentiles)
 print(progress)
